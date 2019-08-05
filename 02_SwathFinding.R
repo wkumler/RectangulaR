@@ -6,6 +6,7 @@
 library(dplyr)
 library(future.apply)
 library(MSnbase)
+library(beepr)
 
 pos_data_path <- "Z:/1_QEdata/Will/RectangulaRdata/positive/"
 if(!dir.exists(pos_data_path)){stop("Is the network drive mapped?")}
@@ -31,33 +32,26 @@ pool_3_data <- readMSData(files = paste0(pos_data_path, pool_3_name), mode = "in
                           centroided. = F, msLevel. = 1)
 blank_data <- readMSData(files = paste0(pos_data_path, blank_file_name), mode = "inMemory", 
                          centroided. = F, msLevel. = 1)
-
 par(mfrow=c(4,1))
+par(mar=c(2,4,0,0.1))
 mz_1 <- unlist(unname(mz(pool_1_data)))
-hist(mz_1[mz_1>60.044&mz_1<60.045],breaks = 100, main="")
 mz_2 <- unlist(unname(mz(pool_2_data)))
-hist(mz_2[mz_2>60.044&mz_2<60.045],breaks = 100, main="")
 mz_3 <- unlist(unname(mz(pool_3_data)))
-hist(mz_3[mz_3>60.044&mz_3<60.045],breaks = 100, main="")
 mz_raw <- c(mz_1, mz_2, mz_3)
-hist(mz_raw[mz_raw>60.044&mz_raw<60.045],breaks = 100, main="")
 
-par(mfrow=c(4,1))
-hist(mz_1[mz_1>200.044&mz_1<200.045],breaks = 100, main="")
-hist(mz_2[mz_2>200.044&mz_2<200.045],breaks = 100, main="")
-hist(mz_3[mz_3>200.044&mz_3<200.045],breaks = 100, main="")
-hist(mz_raw[mz_raw>200.044&mz_raw<200.045],breaks = 100, main="")
+# massCheck <- function(mass){
+#   hist(mz_1[mz_1>mass&mz_1<(mass+0.001)],breaks = 100, main="")
+#   hist(mz_2[mz_2>mass&mz_2<(mass+0.001)],breaks = 100, main="")
+#   hist(mz_3[mz_3>mass&mz_3<(mass+0.001)],breaks = 100, main="")
+#   hist(mz_raw[mz_raw>mass&mz_raw<(mass+0.001)],breaks = 100, main="")
+# }
+# massCheck(60.044)
+# massCheck(200.044)
+# massCheck(117.078979+1.007267)
+# massCheck(291.13046)
+par(mfrow=c(1,1))
 
-massCheck <- function(mass){
-  par(mfrow=c(4,1))
-  hist(mz_1[mz_1>mass&mz_1<(mass+0.001)],breaks = 100, main="")
-  hist(mz_2[mz_2>mass&mz_2<(mass+0.001)],breaks = 100, main="")
-  hist(mz_3[mz_3>mass&mz_3<(mass+0.001)],breaks = 100, main="")
-  hist(mz_raw[mz_raw>mass&mz_raw<(mass+0.001)],breaks = 100, main="")
-  par(mfrow=c(1,1))
-}
-massCheck(200.044)
-massCheck(117.078979+1.007267)
+
 
 # Find medians ----
 
@@ -200,14 +194,6 @@ mod_data %>%
   filterRt(c(650, 800)) %>%
   filterMz(c(308.088, 308.092)) %>%
   will_plotXIC(col=NA, yl=c(308.088, 308.092), mn="Glutathione")
-
-par(mfrow=c(2,1))
-mod_data %>%
-  filterRt(c(700, 1000)) %>%
-  filterMz(c(308.07, 308.12)) %>%
-  will_plotXIC(col=NA, yl=c(308.07, 308.12), mn="Glutathione")
-par(mfrow=c(1,1))
-
 
 # Write out data ----
 
