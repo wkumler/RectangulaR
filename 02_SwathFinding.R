@@ -32,29 +32,23 @@ pool_3_data <- readMSData(files = paste0(pos_data_path, pool_3_name), mode = "in
                           centroided. = F, msLevel. = 1)
 blank_data <- readMSData(files = paste0(pos_data_path, blank_file_name), mode = "inMemory", 
                          centroided. = F, msLevel. = 1)
-par(mfrow=c(4,1))
-par(mar=c(2,4,0,0.1))
+std_mix1_h2o_data <- readMSData(files = paste0(pos_data_path, std_mix1_h2o_name), mode = "inMemory", 
+                                centroided. = F, msLevel. = 1)
+std_mix1_mat_data <- readMSData(files = paste0(pos_data_path, std_mix1_mat_name), mode = "inMemory", 
+                                centroided. = F, msLevel. = 1)
+std_mix2_h2o_data <- readMSData(files = paste0(pos_data_path, std_mix2_h2o_name), mode = "inMemory", 
+                                centroided. = F, msLevel. = 1)
+std_mix2_mat_data <- readMSData(files = paste0(pos_data_path, std_mix2_mat_name), mode = "inMemory", 
+                                centroided. = F, msLevel. = 1)
+
 mz_1 <- unlist(unname(mz(pool_1_data)))
 mz_2 <- unlist(unname(mz(pool_2_data)))
 mz_3 <- unlist(unname(mz(pool_3_data)))
 mz_raw <- c(mz_1, mz_2, mz_3)
 
-# massCheck <- function(mass){
-#   hist(mz_1[mz_1>mass&mz_1<(mass+0.001)],breaks = 100, main="")
-#   hist(mz_2[mz_2>mass&mz_2<(mass+0.001)],breaks = 100, main="")
-#   hist(mz_3[mz_3>mass&mz_3<(mass+0.001)],breaks = 100, main="")
-#   hist(mz_raw[mz_raw>mass&mz_raw<(mass+0.001)],breaks = 100, main="")
-# }
-# massCheck(60.044)
-# massCheck(200.044)
-# massCheck(117.078979+1.007267)
-# massCheck(291.13046)
-par(mfrow=c(1,1))
-
 
 
 # Find medians ----
-
 span <- 7
 lowest_mz <- floor(min(mz_raw))-floor(min(mz_raw))%%span
 highest_mz <- floor(max(mz_raw))+floor(max(mz_raw))%%span
@@ -77,66 +71,12 @@ getMeds <- function(bin_min, mz_raw){
 
 plan(multiprocess, workers = availableCores()-1)
 mids <- unlist(future_lapply(bin_minima, getMeds, mz_raw))
-bin_halves <- mids_clean[-length(mids_clean)]+diff(mids_clean)/2
+bin_halves <- mids[-length(mids)]+diff(mids)/2
 bin_halves <- c(0, bin_halves, 1000)
 
-# Check on median quality ----
-
-par(mfcol=c(3,3))
-par(mar=c(2,4,0,0.1))
-palered <- rgb(1,0,0,0.2)
-
-hist(mz_raw[mz_raw>60.044&mz_raw<60.045],breaks = 100, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-hist(mz_raw[mz_raw>60.04&mz_raw<60.05],breaks = 1000, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-hist(mz_raw[mz_raw>60.0&mz_raw<60.1],breaks = 10000, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-
-hist(mz_raw[mz_raw>200.044&mz_raw<200.045],breaks = 100, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-hist(mz_raw[mz_raw>200.04&mz_raw<200.05],breaks = 1000, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-hist(mz_raw[mz_raw>200.0&mz_raw<200.1],breaks = 10000, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-
-hist(mz_raw[mz_raw>810.101&mz_raw<810.102],breaks = 100, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-hist(mz_raw[mz_raw>810.10&mz_raw<810.11],breaks = 1000, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-hist(mz_raw[mz_raw>810.1&mz_raw<810.2],breaks = 10000, main="")
-abline(v=mids, col=palered)
-abline(v=bin_halves, col="blue")
-
-par(mfcol=c(2,3))
-pool_1_data %>%
-  filterMz(c(200.04, 200.045)) %>%
-  will_plotXIC(col=NA, yl=c(200.040, 200.045))
-abline(h=bin_halves, col="red")
-pool_2_data %>%
-  filterMz(c(200.04, 200.045)) %>%
-  will_plotXIC(col=NA, yl=c(200.040, 200.045))
-abline(h=bin_halves, col="red")
-pool_3_data %>%
-  filterMz(c(200.04, 200.045)) %>%
-  will_plotXIC(col=NA, yl=c(200.040, 200.045))
-abline(h=bin_halves, col="red")
-par(mfcol=c(2,1))
-blank_data %>%
-  filterMz(c(200.04, 200.045)) %>%
-  will_plotXIC(col=NA, yl=c(200.040, 200.045))
-abline(h=bin_halves, col="red")
 
 
-# Apply medians ----
+# Apply flattening and write out data ----
 middling <- function(scan){
   scan_mz <- scan@mz
   scan_cut <- cut(scan_mz, bin_halves)
@@ -144,56 +84,10 @@ middling <- function(scan){
   scan@mz <- new_mz
   return(scan)
 }
-
-
-centered_data <- future_eapply(raw_data_mem@assayData, FUN = middling)
-mod_data <- raw_data_mem
-mod_data@assayData <- as.environment(centered_data)
-
-
-
-# Check on data quality ----
-will_plotXIC <- function (x, main = "", col = "grey", colramp = topo.colors, 
-                          grid.color = "lightgrey", pch = 21, yl = NULL,
-                          mn = NULL, ...) {
-  x <- suppressWarnings(as(x, "data.frame"))
-  bpi <- unlist(lapply(split(x$i, x$rt), max, na.rm = TRUE))
-  brks <- lattice::do.breaks(range(x$i), nint = 256)
-  par(mar = c(0, 4.5, 2, 1))
-  plot(as.numeric(names(bpi)), bpi, xaxt = "n", col = col, 
-       main = mn, bg = lattice:::level.colors(bpi, at = brks, col.regions = colramp), 
-       xlab = "", pch = pch, ylab = "", las = 2, 
-       ...)
-  mtext(side = 4, line = 0, "Intensity", cex = par("cex.lab"))
-  grid(col = grid.color)
-  par(mar = c(3.5, 4.5, 0, 1))
-  plot(x$rt, x$mz, main = "", pch = pch, col = col, xlab = "", 
-       ylab = "", yaxt = "n", ylim = yl,
-       bg = lattice:::level.colors(x$i, at = brks, col.regions = colramp), ...)
-  axis(side = 2, las = 2)
-  grid(col = grid.color)
-  mtext(side = 1, line = 2.5, "Retention time", cex = par("cex.lab"))
-  mtext(side = 4, line = 0, "m/z", cex = par("cex.lab"))
+for(i in ls(pattern = "data$")){
+  centered_data <- future_eapply(i@assayData, FUN = middling)
+  i@assayData <- as.environment(centered_data)
+  writeMSData(i, file = paste0("Z:/1_QEdata/Will/RectangulaRdata/pos_norm/", i, ".mzML"))
 }
 
-par(mfcol=c(2,2))
-raw_data_mem %>%
-  filterRt(c(600, 750)) %>%
-  filterMz(c(90.054, 90.058)) %>%
-  will_plotXIC(col=NA, yl=c(90.054, 90.058), mn="Alanine")
-mod_data %>%
-  filterRt(c(600, 750)) %>%
-  filterMz(c(90.054, 90.058)) %>%
-  will_plotXIC(col=NA, yl=c(90.054, 90.058), mn="Alanine")
-
-raw_data_mem %>%
-  filterRt(c(650, 800)) %>%
-  filterMz(c(308.088, 308.092)) %>%
-  will_plotXIC(col=NA, yl=c(308.088, 308.092), mn="Glutathione")
-mod_data %>%
-  filterRt(c(650, 800)) %>%
-  filterMz(c(308.088, 308.092)) %>%
-  will_plotXIC(col=NA, yl=c(308.088, 308.092), mn="Glutathione")
-
-# Write out data ----
 
