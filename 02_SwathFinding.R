@@ -20,6 +20,8 @@ pool_1_name <- "190715_Poo_TruePooFK180310_Full1.mzML"
 pool_2_name <- "190715_Poo_TruePooFK180310_Full2.mzML"
 pool_3_name <- "190715_Poo_TruePooFK180310_Full3.mzML"
 
+start_time <- Sys.time()
+
 
 
 # Load data ----
@@ -49,16 +51,16 @@ mz_raw <- c(mz_1, mz_2, mz_3)
 
 
 # Find medians ----
-span <- 7
-lowest_mz <- floor(min(mz_raw))-floor(min(mz_raw))%%span
-highest_mz <- floor(max(mz_raw))+floor(max(mz_raw))%%span
+segment_size <- 7
+lowest_mz <- floor(min(mz_raw))-floor(min(mz_raw))%%segment_size
+highest_mz <- floor(max(mz_raw))+floor(max(mz_raw))%%segment_size
+bin_minima <- seq(lowest_mz, highest_mz, segment_size)
 
-bin_minima <- seq(lowest_mz, highest_mz, span)
 getMeds <- function(bin_min, mz_raw){
-  span <- round(bin_min/span)
-  raw_i <- mz_raw[mz_raw>(bin_min)&mz_raw<(bin_min+span)]
+  raw_i <- mz_raw[mz_raw>(bin_min)&mz_raw<(bin_min+segment_size)]
+  span <- round(bin_min/segment_size)
   peak_mids <- list()
-  for(j in seq(0, span-0.1, 0.1)){
+  for(j in seq(0, segment_size-0.1, 0.1)){
     raw_bin_j <- raw_i[raw_i>(bin_min+j)&raw_i<(bin_min+j+0.1)]
     if(length(raw_bin_j)>1){
       hist_bin_j <- hist(raw_bin_j, breaks = 10000, plot = F)
@@ -84,10 +86,17 @@ middling <- function(scan){
   scan@mz <- new_mz
   return(scan)
 }
+
+pb <- txtProgressBar(min = 0, max = total, style = 3)
+v <- 0
 for(i in ls(pattern = "data$")){
-  centered_data <- future_eapply(i@assayData, FUN = middling)
-  i@assayData <- as.environment(centered_data)
-  writeMSData(i, file = paste0("Z:/1_QEdata/Will/RectangulaRdata/pos_norm/", i, ".mzML"))
+  data_i <- get(i)
+  centered_data <- future_eapply(data_i@assayData, FUN = middling)
+  data_i@assayData <- as.environment(centered_data)
+  writeMSData(data_i, file = paste0("Z:/1_QEdata/Will/RectangulaRdata/pos_norm/", i, ".mzML"))
+  print(data_i)
+  v <- v+1
+  setTxtProgressBar(pb, v)
 }
-
-
+close(pb)
+print(Sys.time()-start_time)
