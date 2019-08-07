@@ -1,0 +1,148 @@
+---
+title: "SwathFinding"
+author: "wkumler"
+date: "August 6, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MSnbase)
+library(dplyr)
+```
+
+Mass values in a mass spectrometer are collected in "swaths". Finding these
+swaths of data collection is important when squaring MS data because then
+each data point can be assigned a single mz/rt value across different files.
+
+However, these swaths are not equally spaced, but instead separated by a
+distance proportional to the mass of the molecule. Further, this separation
+is not linear with mass but instead has a gentle curve that appears to be
+best matched by second-order polynomials.
+
+Swaths can be collapsed into peaks by histogramming the number of values found
+at a given m/z value. Histogram bins with a high count will be closer to the
+center of the swath, while histogram bins with low or zero count are found
+between swaths, as seen in the figure below.
+
+```{r histogramming, warning=F, message=F}
+#SwathFindingMiniData was created by filtering
+# Z:/1_QEdata/Will/RectangulaRdata/positive/190715_Blk_KM1906U14-Blk_C.mzML 
+# to masses less than 120 m/z and retention times less than 300 s
+
+simple_data <- readMSData("SwathFindingMiniData.mzML", centroided. = F, msLevel. = 1)
+
+layout(matrix(c(1,1,2,1,1,2), byrow = T, nrow = 2))
+par(mar=c(4.1, 4.1, 0, 0))
+x <- simple_data %>%
+  filterMz(c(90.054, 90.058)) %>%
+  as("data.frame")
+plot(x$rt, x$mz, main = "", pch = 19, xlab = "Retention time", ylab = "m/z",
+     col = lattice:::level.colors(x$i, col.regions = topo.colors, 
+                                  at = lattice::do.breaks(range(x$i), nint = 256)))
+grid()
+par(mar=c(4.1, 0, 0, 0))
+barplot(hist(x$mz, breaks = 1000, plot=F)$counts, 
+        axes = T, space = 0, horiz=TRUE, xlab="Counts", ylab="")
+grid()
+```
+
+The swaths are fairly regular, so we'd like to find the "typical" distance
+between swaths and use that to slice our data into nice bins, each bin
+including one m/z swath. To do that, we apply some peakfinding software from
+MALDIquant to find the local maximum of each peak in the histogram and report
+the distance between the local maxima.
+
+```{r peakpicking}
+mz_raw <- unlist(mz(simple_data))
+
+segment_size <- 7
+lowest_mz <- floor(min(mz_raw))-floor(min(mz_raw))%%segment_size
+highest_mz <- floor(max(mz_raw))+floor(max(mz_raw))%%segment_size
+bin_minima <- seq(lowest_mz, highest_mz, segment_size)
+
+getMeds <- function(bin_min, mz_raw){
+  raw_i <- mz_raw[mz_raw>(bin_min)&mz_raw<(bin_min+segment_size)]
+  span <- round(bin_min/segment_size)
+  peak_mids <- list()
+  for(j in seq(0, segment_size-0.1, 0.1)){
+    raw_bin_j <- raw_i[raw_i>(bin_min+j)&raw_i<(bin_min+j+0.1)]
+    if(length(raw_bin_j)>1){
+      hist_bin_j <- hist(raw_bin_j, breaks = 10000, plot = F)
+      peak_idxs <- MALDIquant:::.localMaxima(hist_bin_j$counts, span)
+      peak_mids[[(j+0.1)*10]] <- hist_bin_j$mids[peak_idxs]
+    }
+  }
+  return(peak_mids)
+}
+
+mids <- unlist(lapply(bin_minima, getMeds, mz_raw))
+
+fit_df <- data.frame(mass=mids[-1], diff_y=diff(mids))
+fit_df_smallnums <- filter(fit_df, diff_y<0.001)
+layout(matrix(c(1,1,2,1,1,2), byrow = T, nrow = 2))
+plot(fit_df$mass, fit_df$diff_y, las=1,
+     ylab="Distance between swaths (Da)", xlab="Molecule mass")
+plot(fit_df_smallnums$mass, fit_df_smallnums$diff_y, las=1,
+     ylab="Distance between swaths (Da)", xlab="Molecule mass")
+```
+
+This plot is more or less exactly what we expected. Remember, we're looking for
+a positive correlation between molecular mass and distance between swaths.
+
+The left plot shows the raw
+differences between swaths, but this is hard to see patterns in because a few
+outliers throw the y-axis out of whack. On the right, I've zoomed in to just
+swath differences less than 0.001 Da - still showing ~95% of the data. Here,
+we can see the trends that we were looking for. The thick line along the bottom
+is the "true" signal, the typical distance between swaths. The fainter upper
+trends occur when a peak is missing in the data - for example, in regions where
+molecules themselves are few and far between. These show the same trend as the
+actual data, but have a slope double, triple, etc. the base signal as one, two, 
+or more peaks are absent.
+
+What we'd like to do is eliminate the false signal here and run a linear
+regression on the true data points. I'm going to do this semi-manually by
+fitting quadratic equations to three points along the curve, then calculating
+the coefficients via some linear algebra magic.
+
+```{r quadratics}
+curveMaker <- function(x, formula){formula[1]*x**2+formula[2]*x+formula[3]}
+
+test_points <- data.frame(x=c(60, 90, 120), 
+                           y_upper=c(0.00020, 0.00035, 0.00053),
+                           y_lower=c(0.00007, 0.00011, 0.00021))
+
+form_mat <- rbind(c(test_points$x[1]**2, test_points$x[1], 1), 
+                 c(test_points$x[2]**2, test_points$x[2], 1),
+                 c(test_points$x[3]**2, test_points$x[3], 1))
+upper_formula <- solve(form_mat, test_points$y_upper)
+upper_bound <- curveMaker(fit_df_smallnums$mass, upper_formula)
+lower_formula <- solve(form_mat, test_points$y_lower)
+lower_bound <- curveMaker(fit_df_smallnums$mass, lower_formula)
+
+par(mfrow=c(1,2))
+
+plot(fit_df_smallnums$mass, fit_df_smallnums$diff_y,
+     ylab="Distance between swaths (Da)", xlab="Molecule mass")
+points(test_points$x, test_points$y_upper, col="red", lwd=2, cex=2)
+points(test_points$x, test_points$y_lower, col="red", lwd=2, cex=2)
+points(fit_df_smallnums$mass, upper_bound, col="red", cex=0.2)
+points(fit_df_smallnums$mass, lower_bound, col="red", cex=0.2)
+
+good_vals <- filter(fit_df_smallnums, diff_y<upper_bound&diff_y>lower_bound)
+plot(good_vals, ylim=c(0, 0.001),
+     ylab="Distance between swaths (Da)", xlab="Molecule mass")
+```
+
+We probably could fit the model a lot tighter and remove more noise, but that's 
+what the linear model is designed to do - all that we were hoping to accomplish
+with this step was removing the signal from the missing peak differences.
+
+Now let's fit the linear model to our pretty data:
+
+```{r linearize}
+
+
+
+```
