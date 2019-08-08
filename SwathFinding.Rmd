@@ -80,7 +80,7 @@ mids <- unlist(lapply(bin_minima, getMeds, mz_raw))
 
 fit_df <- data.frame(mass=mids[-1], diff_y=diff(mids))
 fit_df_smallnums <- filter(fit_df, diff_y<0.001)
-layout(matrix(c(1,1,2,1,1,2), byrow = T, nrow = 2))
+layout(matrix(c(1,2,1,2), byrow = T, nrow = 2))
 plot(fit_df$mass, fit_df$diff_y, las=1,
      ylab="Distance between swaths (Da)", xlab="Molecule mass")
 plot(fit_df_smallnums$mass, fit_df_smallnums$diff_y, las=1,
@@ -139,10 +139,143 @@ We probably could fit the model a lot tighter and remove more noise, but that's
 what the linear model is designed to do - all that we were hoping to accomplish
 with this step was removing the signal from the missing peak differences.
 
-Now let's fit the linear model to our pretty data:
+Now let's fit the linear model to our pretty data. The question here, as with all
+non-linear models, is how to balance between overfitting and accuracy. AIC's do
+a reasonable job of estimating this, but I'm not even sure the curve is polynomic
+- rather, it could quite easily be exponential, which is more what I'd expect
+given the data itself. I'm thinking a feedback loop (i.e. exponential) is more
+likely than the data itself curving in a polynomic way.
 
-```{r linearize}
+Additionally, we should decide whether to fit the model through zero. There
+are [arguments against this](https://dynamicecology.wordpress.com/2017/04/13/dont-force-your-regression-through-zero-just-because-you-know-the-true-intercept-has-to-be-zero/), 
+basically pointing out that if your model doesn't
+go through zero automatically, you should beware of non-linear effects near zero
+where the signal itself breaks down.
 
+So we've got three models to try initially: polynomial, polynomial with fixed intercept,
+and exponential. Data below!
 
+```{r linearize, fig.height=9, fig.width=6}
+par(mfrow=c(3,1))
+par(mar=c(0.1, 4.1, 0.1, 0.1))
 
+#Polynomial
+model <- lm(good_vals$diff_y~poly(good_vals$mass, 2, raw = T))
+coefs <- model$coefficients
+np_vals <- sapply(good_vals$mass, function(x){coefs[3]*x**2+coefs[2]*x+coefs[1]})
+plot(good_vals,
+     ylab="Distance between swaths (Da)", xlab="", xaxt="n")
+points(good_vals$mass, np_vals, col="red", pch=19, cex=0.2)
+legend("topleft", legend = bquote(italic("R")^2 ~ "=" ~ .(summary(model)$r.squared)))
+
+#Polynomial with fixed intercept
+model <- lm(good_vals$diff_y~0+poly(good_vals$mass, 2, raw = T))
+coefs <- model$coefficients
+np_vals <- sapply(good_vals$mass, function(x){coefs[2]*x**2+coefs[1]*x})
+plot(good_vals,
+     ylab="Distance between swaths (Da)", xlab="", xaxt="n")
+points(good_vals$mass, np_vals, col="red", pch=19, cex=0.2)
+legend("topleft", legend = bquote(italic("R")^2 ~ "=" ~ .(summary(model)$r.squared)))
+
+par(mar=c(4.1, 4.1, 0.1, 0.1))
+# Exponential
+model <- lm(log(good_vals$diff_y)~good_vals$mass)
+plot(log(good_vals$diff_y)~good_vals$mass,
+     ylab="Log distance between swaths (Da)", xlab="Molecule mass")
+abline(model, col="red", lwd=3)
+legend("topleft", legend = bquote(italic("R")^2 ~ "=" ~ .(summary(model)$r.squared)))
 ```
+
+The quadratic model fit through zero appears to be the best fit, but I'm wary
+of the fixed at zero term and the interpretation of the $R^2$ without an
+intercept.
+
+What this equation tells us is, given a mass, how wide we can expect its swath
+to be. So we need to recursively calculate the masses of each possible bin,
+acknowledging that they increase in size and that the width of each is entirely
+dependent on the mass calculated before. We also need to identify a start value
+from which to begin predicting bins.
+
+Let's compare how well our mid-prediction function works to the actual, identified
+swaths found above:
+
+```{r recursive}
+bestfit_formula_maker <- function(model){
+  if(model=="quad"){
+    coefs <- lm(good_vals$diff_y~poly(good_vals$mass, 2, raw = T))$coefficients
+    return(function(x){as.numeric(coefs[3]*x**2+coefs[2]*x+coefs[1])})
+  } else if(model=="quad0") {
+    coefs <- lm(good_vals$diff_y~poly(good_vals$mass, 2, raw = T)+0)$coefficients
+    return(function(x){as.numeric(coefs[2]*x**2+coefs[1]*x)})
+  } else if(model=="exp"){
+    coefs <- lm(log(good_vals$diff_y)~good_vals$mass)$coefficients
+    return(function(x){exp(coefs[2]*x)+exp(coefs[1])}) # Currently broken?
+  }
+}
+
+midsPredictor <- bestfit_formula_maker("quad")
+value <- 60.044065
+pred_mids <- list(value)
+while(value < max(simple_data@assayData$F1.S001@mz)){
+  new_value <- value+midsPredictor(value)
+  pred_mids[[length(pred_mids)+1]] <- new_value
+  value <- new_value
+}
+pred_mids <- unlist(pred_mids)
+
+layout(mat = matrix(c(1,1,2,3,4,5), byrow = T, ncol = 2))
+par(mar=c(2.1, 2.1, 0.1, 0.1))
+
+for(tuple in list(c(60.04, 60.06), c(60.0435, 60.0465), c(60.0518, 60.055),
+                  c(60.055, 60.057), c(60.057, 60.06))){
+  hist(mz_raw[mz_raw>tuple[1]&mz_raw<tuple[2]], breaks = 1000, main="", xlab="", ylab="")
+  abline(v=mids, col=rgb(1,0,0,0.2))
+  abline(v=pred_mids, col=rgb(0,0,1,0.2))
+}
+
+
+midsPredictor <- bestfit_formula_maker("quad0")
+value <- 60.044065
+pred_mids <- list(value)
+while(value < max(simple_data@assayData$F1.S001@mz)){
+  new_value <- value+midsPredictor(value)
+  pred_mids[[length(pred_mids)+1]] <- new_value
+  value <- new_value
+}
+pred_mids <- unlist(pred_mids)
+
+layout(mat = matrix(c(1,1,2,3,4,5), byrow = T, ncol = 2))
+par(mar=c(2.1, 2.1, 0.1, 0.1))
+
+for(tuple in list(c(60.04, 60.06), c(60.0435, 60.0465), c(60.0518, 60.055),
+                  c(60.055, 60.057), c(60.057, 60.06))){
+  hist(mz_raw[mz_raw>tuple[1]&mz_raw<tuple[2]], breaks = 1000, main="", xlab="", ylab="")
+  abline(v=mids, col=rgb(1,0,0,0.2))
+  abline(v=pred_mids, col=rgb(0,0,1,0.2))
+}
+```
+
+In the example above, I'm using the first peak in the left graph as the start
+value for the prediction function (i.e. a mass of 60.044065). The red lines are at
+manually-determined (okay, not manually, using the local maximum algorithm) peaks
+and the blue lines show where the linear model predicts that we'd find peaks. The
+red lines are only found where we have data, but we'd like to create swaths
+across *all* areas, in case future files have data where there isn't any in the
+calibration file.
+
+The prediction does an excellent job of predicting the peaks within a group of
+swaths, but immediately breaks down when it attemps to predict "across the gap"
+and is significantly off when applied to the next group.
+
+I'm assuming this is because the mass-spec doesn't actually collect the swaths in
+a regular fashion. Instead, it has some way of noticing when there's ions (even
+if those ions are at zero intensity?) and measuring them. Or perhaps it re-calibrates
+where it's collecting swaths (i.e. where the bins are) whenever it runs into
+an empty area.
+
+Either way, this is pretty much a death knell for this particular project. In order
+to have rectangular data across files, there must be a way of properly predicting
+where the m/z values will be collected. Whether because the model doesn't fit the data
+perfectly or because the data itself isn't collected in a regular fashion, there
+doesn't seem to be a way to predict swaths algorithmically across peak groups,
+let alone different files.
